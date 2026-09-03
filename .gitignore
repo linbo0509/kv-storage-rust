@@ -1,0 +1,16 @@
+# Rust 编译产物
+/target/
+
+# 本地运行数据
+/data/
+/server-data/
+
+# 演示生成结果
+/demo-output/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
