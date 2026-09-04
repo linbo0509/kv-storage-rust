@@ -1,7 +1,7 @@
 //! JSON 快照的校验、读取与原子替换。
 
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -144,7 +144,10 @@ impl SnapshotRepository {
             let backup_path = self.path.with_extension("bak");
             fs::copy(&self.path, &backup_path)
                 .map_err(|error| PersistenceError::io("backup snapshot", &backup_path, error))?;
-            File::open(&backup_path)
+            // 用写权限打开，保证 Windows 上 sync_all 的 FlushFileBuffers 能成功。
+            OpenOptions::new()
+                .write(true)
+                .open(&backup_path)
                 .and_then(|file| file.sync_all())
                 .map_err(|error| {
                     PersistenceError::io("sync snapshot backup", &backup_path, error)
@@ -263,6 +266,24 @@ mod tests {
             repository.load(),
             Err(PersistenceError::Corrupt { .. })
         ));
+    }
+
+    #[test]
+    fn saving_twice_backs_up_the_previous_snapshot() {
+        let test_dir = TestDir::new();
+        let repository = SnapshotRepository::new(test_dir.snapshot_path());
+        let mut store = Store::new();
+        store.set("course".into(), "Rust".into()).unwrap();
+        repository.save(&store, 1).unwrap();
+
+        store.set("teacher".into(), "Li".into()).unwrap();
+        repository.save(&store, 2).unwrap();
+
+        let loaded = repository.load().unwrap().unwrap();
+        assert_eq!(loaded.last_seq, 2);
+        assert_eq!(loaded.store.get("course"), Ok("Rust"));
+        assert_eq!(loaded.store.get("teacher"), Ok("Li"));
+        assert!(test_dir.snapshot_path().with_extension("bak").is_file());
     }
 
     #[test]

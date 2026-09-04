@@ -106,6 +106,13 @@ impl Store {
         }
     }
 
+    /// 清空全部键值，返回被清除的键数量。
+    pub fn clear(&mut self) -> usize {
+        let count = self.entries.len();
+        self.entries.clear();
+        count
+    }
+
     /// 导出有序数据，用于生成内容稳定、便于阅读和校验的 JSON 快照。
     #[must_use]
     pub fn export_entries(&self) -> BTreeMap<String, String> {
@@ -224,6 +231,20 @@ mod tests {
                 key: "course".into()
             }),
             Ok(Reply::Value("Rust".into()))
+        );
+    }
+
+    #[test]
+    fn clear_removes_all_entries_and_reports_the_count() {
+        let mut store = Store::new();
+        store.set("a".into(), "1".into()).unwrap();
+        store.set("b".into(), "2".into()).unwrap();
+
+        assert_eq!(store.clear(), 2);
+        assert_eq!(store.status(), StoreStatus { key_count: 0 });
+        assert_eq!(
+            store.get("a"),
+            Err(DomainError::NotFound { key: "a".into() })
         );
     }
 

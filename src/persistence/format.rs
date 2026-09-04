@@ -125,13 +125,14 @@ fn decode_utf8_hex(value: &str, field_name: &str) -> Result<String, FormatError>
         )));
     }
 
-    let mut bytes = Vec::with_capacity(value.len() / 2);
     let raw = value.as_bytes();
-    for pair in raw.chunks_exact(2) {
-        let high = hex_digit(pair[0]).ok_or_else(|| {
+    let (pairs, _remainder) = raw.as_chunks::<2>();
+    let mut bytes = Vec::with_capacity(pairs.len());
+    for &[high, low] in pairs {
+        let high = hex_digit(high).ok_or_else(|| {
             FormatError::Invalid(format!("{field_name} contains invalid hexadecimal data"))
         })?;
-        let low = hex_digit(pair[1]).ok_or_else(|| {
+        let low = hex_digit(low).ok_or_else(|| {
             FormatError::Invalid(format!("{field_name} contains invalid hexadecimal data"))
         })?;
         bytes.push((high << 4) | low);

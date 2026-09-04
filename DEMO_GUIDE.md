@@ -3,15 +3,16 @@
 本手册采用手动粘贴命令的方式。建议提前打开三个终端窗口，并将窗口标题或位置
 分别标记为：**服务器**、**客户端 A**、**客户端 B**。
 
-> 以下命令均从项目目录 `/Users/wlffffff/code/rust/kv_storage_rust` 开始。
-> 演示数据单独保存在 `demo-manual-data`，不会影响平时使用的 `server-data`。
+> 以下命令均从项目根目录开始执行。演示数据单独保存在 `demo-manual-data`，
+> 不会影响平时使用的 `server-data`。命令面向 macOS / Linux / Git Bash；
+> 在 Windows 上请使用 Git Bash 或 WSL 运行。
 
 ## 演示前准备
 
-三个窗口都先进入项目目录：
+三个窗口都先进入项目根目录：
 
 ```bash
-cd /Users/wlffffff/code/rust/kv_storage_rust
+cd kv-storage-rust
 ```
 
 只需在服务器窗口构建一次：
@@ -210,7 +211,7 @@ EXIT
 先在服务器窗口按 `Control+C` 停止服务。复制一份演示数据，避免破坏正常数据：
 
 ```bash
-cp -R demo-manual-data demo-corrupt-data
+cp -r demo-manual-data demo-corrupt-data
 ```
 
 故意破坏副本中的快照：

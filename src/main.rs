@@ -13,6 +13,9 @@ use kv_storage_rust::protocol::{Request, parse_request};
 enum LocalCommand {
     Domain(Command),
     Save,
+    Clear,
+    Yes,
+    No,
     Help,
     Exit,
 }
@@ -38,6 +41,9 @@ fn main() {
     println!("数据目录：{}", data_dir.display());
     println!("已恢复 {} 个键", engine.status().key_count);
     print_help();
+
+    // 清空数据需要二次确认：CLEAR 之后仅接受 YES/NO。
+    let mut clear_pending = false;
 
     loop {
         print!("kv> ");
@@ -68,6 +74,17 @@ fn main() {
             }
         };
 
+        // 清空二次确认：处于待确认状态时，输入 YES/NO 之外的命令会取消确认。
+        if clear_pending
+            && !matches!(
+                command,
+                LocalCommand::Yes | LocalCommand::No | LocalCommand::Clear
+            )
+        {
+            clear_pending = false;
+            println!("已取消清空");
+        }
+
         match command {
             LocalCommand::Domain(command) => match engine.execute(command) {
                 Ok(reply) => print_reply(reply),
@@ -77,6 +94,30 @@ fn main() {
                 }
             },
             LocalCommand::Save => save_snapshot(&mut engine),
+            LocalCommand::Clear => {
+                clear_pending = true;
+                println!("OK CLEAR_PENDING 确定清空全部数据吗？请输入 YES 确认，或 NO 取消");
+            }
+            LocalCommand::Yes => {
+                if clear_pending {
+                    clear_pending = false;
+                    match engine.clear() {
+                        Ok(cleared) => println!("OK CLEARED {cleared}"),
+                        Err(EngineError::Domain(error)) => print_domain_error(error),
+                        Err(EngineError::Persistence(error)) => println!("ERR PERSISTENCE {error}"),
+                    }
+                } else {
+                    println!("ERR INVALID_COMMAND 当前没有待确认的清空操作");
+                }
+            }
+            LocalCommand::No => {
+                if clear_pending {
+                    clear_pending = false;
+                    println!("OK CLEAR_CANCELLED");
+                } else {
+                    println!("ERR INVALID_COMMAND 当前没有待确认的清空操作");
+                }
+            }
             LocalCommand::Help => print_help(),
             LocalCommand::Exit => {
                 save_snapshot(&mut engine);
@@ -116,6 +157,9 @@ fn parse_local_command(input: &str) -> Result<LocalCommand, String> {
     match parse_request(input).map_err(|error| error.to_string())? {
         Request::Execute(command) => Ok(LocalCommand::Domain(command)),
         Request::Save => Ok(LocalCommand::Save),
+        Request::Clear => Ok(LocalCommand::Clear),
+        Request::Yes => Ok(LocalCommand::Yes),
+        Request::No => Ok(LocalCommand::No),
         Request::Quit => Ok(LocalCommand::Exit),
     }
 }
@@ -155,6 +199,7 @@ fn print_help() {
     println!("  KEYS              列出所有键");
     println!("  STATUS            查看状态");
     println!("  SAVE              生成 JSON 快照并压缩 WAL");
+    println!("  CLEAR             清空全部数据（需二次确认）");
     println!("  HELP              显示帮助");
     println!("  EXIT              退出");
 }
@@ -181,6 +226,22 @@ mod tests {
         assert!(parse_local_command("GET course extra").is_err());
         assert!(parse_local_command("STATUS extra").is_err());
         assert!(parse_local_command("SAVE extra").is_err());
+    }
+
+    #[test]
+    fn parses_clear_and_confirmation_tokens() {
+        assert!(matches!(
+            parse_local_command("CLEAR").unwrap(),
+            LocalCommand::Clear
+        ));
+        assert!(matches!(
+            parse_local_command("YES").unwrap(),
+            LocalCommand::Yes
+        ));
+        assert!(matches!(
+            parse_local_command("NO").unwrap(),
+            LocalCommand::No
+        ));
     }
 
     #[test]

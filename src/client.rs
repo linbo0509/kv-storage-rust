@@ -187,6 +187,7 @@ fn print_help() {
     println!("  KEYS              列出所有键");
     println!("  STATUS            查看状态");
     println!("  SAVE              生成 JSON 快照并压缩 WAL");
+    println!("  CLEAR             清空全部数据（需二次确认）");
     println!("  HELP              显示帮助（客户端本地命令）");
     println!("  EXIT / QUIT       断开连接并退出");
 }

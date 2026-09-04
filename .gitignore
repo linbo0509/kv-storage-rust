@@ -7,6 +7,12 @@
 
 # 演示生成结果
 /demo-output/
+/demo-manual-data/
+/demo-corrupt-data/
+
+# 运行时临时与备份文件
+*.tmp
+*.bak
 
 # macOS
 .DS_Store

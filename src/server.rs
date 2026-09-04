@@ -31,6 +31,7 @@ pub struct ServerConfig {
     pub checkpoint_after_writes: u64,
 }
 
+/// 默认每累计多少次成功修改自动生成快照；`ServerConfig::default` 使用该值。
 pub const DEFAULT_CHECKPOINT_AFTER_WRITES: u64 = 1_000;
 
 impl Default for ServerConfig {
@@ -131,6 +132,8 @@ fn handle_client(
         .map_err(|source| ServerError::io("复制客户端连接", source))?;
     let mut reader = BufReader::new(reader_stream);
     let mut writer = stream;
+    // 清空数据需要二次确认：CLEAR 之后仅接受 YES/NO。
+    let mut clear_pending = false;
 
     loop {
         let line = match read_frame(&mut reader) {
@@ -164,7 +167,33 @@ fn handle_client(
 
         let operation = describe_request(&request);
         let should_close = matches!(request, Request::Quit);
-        let response = handle_request(request, engine, metrics, checkpoint_after_writes);
+        let response = match (clear_pending, request) {
+            (true, Request::Yes) => {
+                clear_pending = false;
+                clear_engine(engine)
+            }
+            (true, Request::No) => {
+                clear_pending = false;
+                "OK\tCLEAR_CANCELLED".into()
+            }
+            (true, Request::Clear) => {
+                // 重复输入 CLEAR 时保持待确认状态并重新提示。
+                "OK\tCLEAR_PENDING\t确定清空全部数据吗？请输入 YES 确认，或 NO 取消".into()
+            }
+            (true, other) => {
+                // 确认被其他命令打断：取消确认，并按普通命令继续处理。
+                clear_pending = false;
+                handle_request(other, engine, metrics, checkpoint_after_writes)
+            }
+            (false, Request::Clear) => {
+                clear_pending = true;
+                "OK\tCLEAR_PENDING\t确定清空全部数据吗？请输入 YES 确认，或 NO 取消".into()
+            }
+            (false, Request::Yes | Request::No) => {
+                format_error("INVALID_COMMAND", "当前没有待确认的清空操作")
+            }
+            (false, other) => handle_request(other, engine, metrics, checkpoint_after_writes),
+        };
         if response.starts_with("ERR\t") {
             metrics.record_command_failure();
         }
@@ -186,6 +215,9 @@ fn describe_request(request: &Request) -> String {
         Request::Execute(Command::Keys) => "KEYS".into(),
         Request::Execute(Command::Status) => "STATUS".into(),
         Request::Save => "SAVE".into(),
+        Request::Clear => "CLEAR".into(),
+        Request::Yes => "YES".into(),
+        Request::No => "NO".into(),
         Request::Quit => "QUIT".into(),
     }
 }
@@ -294,6 +326,23 @@ fn handle_request(
             }
         }
         Request::Quit => "OK	BYE".into(),
+        Request::Clear | Request::Yes | Request::No => {
+            // 这些指令在 handle_client 的确认状态机中处理，不应到达这里。
+            format_error("INTERNAL", "清空确认指令未在连接层被拦截")
+        }
+    }
+}
+
+/// 真正执行清空：加锁后调用 `Engine::clear`，并格式化响应。
+fn clear_engine(engine: &SharedEngine) -> String {
+    let mut engine = match engine.lock() {
+        Ok(engine) => engine,
+        Err(_) => return poisoned_engine_response(),
+    };
+    match engine.clear() {
+        Ok(cleared) => format!("OK\tCLEARED\t{cleared}"),
+        Err(EngineError::Domain(error)) => format_error("DOMAIN", &error.to_string()),
+        Err(EngineError::Persistence(error)) => format_error("PERSISTENCE", &error.to_string()),
     }
 }
 
@@ -560,6 +609,52 @@ mod tests {
             "RUST_KV_WAL\t2\t2\n"
         );
         assert_eq!(Engine::open(test_dir.path()).unwrap().status().key_count, 2);
+    }
+
+    #[test]
+    fn clear_requires_yes_confirmation_and_wipes_data() {
+        let test_dir = TestDir::new();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let data_dir = test_dir.path().to_path_buf();
+
+        let server = thread::spawn(move || serve_one(listener, data_dir));
+        let mut client = Client::connect(&address.to_string()).unwrap();
+
+        assert_eq!(client.send("SET course Rust").unwrap(), "OK\tCREATED");
+
+        // 第一次输入 CLEAR 只返回提示，不真正清空。
+        let pending = client.send("CLEAR").unwrap();
+        assert!(pending.starts_with("OK\tCLEAR_PENDING\t"));
+
+        // NO 取消清空，数据仍在。
+        assert_eq!(client.send("NO").unwrap(), "OK\tCLEAR_CANCELLED");
+        assert_eq!(client.send("GET course").unwrap(), "VALUE\tRust");
+
+        // 没有待确认操作时，YES/NO 会被拒绝。
+        assert_eq!(
+            client.send("YES").unwrap(),
+            "ERR\tINVALID_COMMAND\t当前没有待确认的清空操作"
+        );
+
+        // 再次 CLEAR 后用 YES 确认，才真正清空。
+        assert!(
+            client
+                .send("CLEAR")
+                .unwrap()
+                .starts_with("OK\tCLEAR_PENDING\t")
+        );
+        assert_eq!(client.send("YES").unwrap(), "OK\tCLEARED\t1");
+        assert!(
+            client
+                .send("GET course")
+                .unwrap()
+                .starts_with("ERR\tDOMAIN\t")
+        );
+
+        assert_eq!(client.send("QUIT").unwrap(), "OK\tBYE");
+        server.join().unwrap().unwrap();
+        assert_eq!(Engine::open(test_dir.path()).unwrap().status().key_count, 0);
     }
 
     #[test]

@@ -18,6 +18,12 @@ pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 pub enum Request {
     Execute(Command),
     Save,
+    /// 请求清空全部数据；实际清空需要二次确认。
+    Clear,
+    /// 二次确认：同意清空。
+    Yes,
+    /// 二次确认：取消清空。
+    No,
     Quit,
 }
 
@@ -96,6 +102,18 @@ pub fn parse_request(line: &str) -> Result<Request, ProtocolError> {
         "SAVE" => {
             ensure_no_extra_parts(&mut parts)?;
             Ok(Request::Save)
+        }
+        "CLEAR" => {
+            ensure_no_extra_parts(&mut parts)?;
+            Ok(Request::Clear)
+        }
+        "YES" => {
+            ensure_no_extra_parts(&mut parts)?;
+            Ok(Request::Yes)
+        }
+        "NO" => {
+            ensure_no_extra_parts(&mut parts)?;
+            Ok(Request::No)
         }
         "QUIT" | "EXIT" => {
             ensure_no_extra_parts(&mut parts)?;
@@ -280,6 +298,22 @@ mod tests {
             format_reply(Reply::Value("line1\nline2".into())),
             "VALUE\tline1\\nline2"
         );
+    }
+
+    #[test]
+    fn parses_clear_and_confirmation_tokens() {
+        assert_eq!(parse_request("CLEAR").unwrap(), Request::Clear);
+        assert_eq!(parse_request("YES").unwrap(), Request::Yes);
+        assert_eq!(parse_request("yes").unwrap(), Request::Yes);
+        assert_eq!(parse_request("NO").unwrap(), Request::No);
+        assert!(matches!(
+            parse_request("CLEAR extra"),
+            Err(ProtocolError::ExtraArguments)
+        ));
+        assert!(matches!(
+            parse_request("YES extra"),
+            Err(ProtocolError::ExtraArguments)
+        ));
     }
 
     #[test]

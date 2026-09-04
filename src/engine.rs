@@ -97,10 +97,25 @@ impl Engine {
         self.writes_since_checkpoint = 0;
         Ok(())
     }
+
+    /// 清空全部数据并重新初始化持久化文件。
+    ///
+    /// 先清空内存，再复用检查点把「空快照 + 空 WAL」落盘。序列号保持单调递增
+    /// 而非归零，以免快照与 WAL 在无法原子切换时留下不一致窗口。
+    pub fn clear(&mut self) -> Result<usize, EngineError> {
+        let cleared = self.store.clear();
+        self.checkpoint()?;
+        Ok(cleared)
+    }
 }
 
+/// `execute_with_auto_checkpoint` 的执行结果。
+///
+/// 自动快照的结果单独存放，即使失败也不否定已经成功写入 WAL 的业务命令。
 pub struct ExecutionOutcome {
+    /// 业务命令的成功响应。
     pub reply: Reply,
+    /// 本次执行后是否触发了自动快照，以及其结果。
     pub auto_checkpoint: Option<Result<(), EngineError>>,
 }
 
@@ -354,5 +369,39 @@ mod tests {
             .unwrap();
         assert!(matches!(outcome.auto_checkpoint, Some(Ok(()))));
         assert_eq!(recovered.writes_since_checkpoint(), 0);
+    }
+
+    #[test]
+    fn clear_empties_data_and_persists_an_empty_state() {
+        let test_dir = TestDir::new();
+        {
+            let mut engine = Engine::open(test_dir.path()).unwrap();
+            engine
+                .execute(Command::Set {
+                    key: "course".into(),
+                    value: "Rust".into(),
+                })
+                .unwrap();
+            engine
+                .execute(Command::Set {
+                    key: "teacher".into(),
+                    value: "李老师".into(),
+                })
+                .unwrap();
+
+            let cleared = engine.clear().unwrap();
+            assert_eq!(cleared, 2);
+            assert_eq!(engine.status().key_count, 0);
+        }
+
+        let mut recovered = Engine::open(test_dir.path()).unwrap();
+        assert_eq!(recovered.status().key_count, 0);
+        recovered
+            .execute(Command::Set {
+                key: "fresh".into(),
+                value: "value".into(),
+            })
+            .unwrap();
+        assert_eq!(recovered.status().key_count, 1);
     }
 }
