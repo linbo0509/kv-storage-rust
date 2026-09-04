@@ -1,0 +1,19 @@
+{
+  "started_at": "2026-09-03T12:34:13.359133+08:00",
+  "platform": "macOS-15.7.7-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "python": "3.14.5",
+  "rustc": "rustc 1.91.0 (f8297e351 2025-10-28)",
+  "java": "openjdk version \"26\" 2026-03-17\nOpenJDK Runtime Environment (build 26+35-2893)\nOpenJDK 64-Bit Server VM (build 26+35-2893, mixed mode, sharing)",
+  "parameters": {
+    "rounds": 5,
+    "warmup": 10,
+    "duration": 30,
+    "rate": 60000,
+    "clients": 32,
+    "keys": 50000,
+    "value_size": 1024,
+    "cooldown": 3,
+    "output": "/Users/wlffffff/code/rust/rust_exp/results/formal-20260903-123413"
+  }
+}

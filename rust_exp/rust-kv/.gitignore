@@ -1,0 +1,6 @@
+# Rust 编译产物，可由 Cargo 重新生成
+/target
+
+# 本地运行产生的快照和 WAL，避免误提交真实数据
+/data
+/server-data
