@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * 实验 A 的 Java 纯内存 KV 服务器。
+ * Rust/Java 对照实验使用的 Java 纯内存 KV 服务器。
  *
  * <p>它与 Rust 实验服务器采用相同的逐行 TCP 协议、线程模型、共享锁和 HashMap，
  * 并刻意关闭磁盘持久化与逐条日志，使实验主要观察内存分配和 GC 对尾延迟的影响。</p>

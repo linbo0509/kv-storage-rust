@@ -1,7 +1,8 @@
 __pycache__/
-*.pyc
+*.py[cod]
 rust-kv/target/
 java-kv/target/
+java-kv/.idea/
+java-kv/.run/
 results/demo-*/
 results/smoke-*/
-

@@ -20,3 +20,12 @@
 # IDE
 .idea/
 .vscode/
+.run/
+*.iml
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# 课程报告属于提交材料，不进入代码仓库
+/course_reports/

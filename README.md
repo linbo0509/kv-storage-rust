@@ -51,6 +51,9 @@ src/
 
 ## 快速开始
 
+环境要求：Rust stable 工具链。运行 `rust_exp` 对照实验时还需要 JDK 17、
+Python 3.10，以及 Maven 或 `javac`。
+
 ### 本地单机版
 
 ```bash
@@ -113,9 +116,6 @@ WAL。可以使用 `--checkpoint-after N` 修改阈值，设置为 0 时关闭�
 | `CLEAR` | 请求清空全部数据（需二次确认） |
 | `HELP` | 显示帮助（客户端本地命令） |
 | `EXIT` / `QUIT` | 断开连接并退出 |
-
-`CLEAR` 不会立即清空，而是提示输入 `YES` 确认或 `NO` 取消；只有输入 `YES`
-才会真正清空全部数据，并把持久化文件重置为初始状态。
 
 ## Rust 与 Java 对比实验
 

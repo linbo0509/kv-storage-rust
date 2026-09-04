@@ -1,130 +1,120 @@
-# Rust 与 Java GC 对照实验 A
+# Rust 与 Java G1 对照实验
 
-本目录是完全独立的纯内存 KV 性能实验，不会修改或读写原项目的数据。两种服务
-使用相同的逐行 TCP 协议、线程模型、共享互斥锁和键值工作负载；实验关闭 WAL、
-快照和逐条操作日志，重点观察 Java GC 对尾延迟的影响。
+本目录提供一套与主项目隔离的纯内存 KV 对照实验，用于观察 Rust 与 Java G1 在
+持续对象替换压力下的延迟、CPU、常驻内存和 GC 行为。实验关闭 WAL、快照和逐条
+操作日志，不会读取或修改主项目的数据。
 
-## 目录
+## 实验组成
 
 ```text
 rust_exp/
-├── rust-kv/       # 原 Rust 项目的隔离副本，新增两个实验二进制
-├── java-kv/       # IntelliJ IDEA 可直接打开的 Maven Java 项目
-└── results/       # CSV 和 Java GC 日志
+├── rust-kv/                  # Rust 服务端和两端共用的压测客户端
+├── java-kv/                  # Java 17 纯内存服务端
+├── run_formal_experiment.py  # 多轮交替实验与资源采样
+├── generate_dashboard.py     # 汇总结果并生成四宫格图
+├── demo.sh                   # 课堂快速演示入口
+└── results/                  # 已归档的正式实验结果
 ```
 
-实验程序：
+两种服务端使用相同的逐行 TCP 协议、每连接一线程模型、`HashMap` 和全局互斥锁，
+并由同一个 Rust 压测客户端发送完全相同的请求。
 
-- `kv-memory-server`：Rust 纯内存服务器，默认监听 `127.0.0.1:7878`。
-- `JavaKvServer`：Java 纯内存服务器，默认监听 `127.0.0.1:7879`。
-- `kv-bench`：两种服务器共用的 Rust 压测客户端。
+## 环境要求
 
-## 一、构建统一压测工具和 Rust 服务
+- Rust stable 工具链；
+- JDK 17 或更高版本，能够使用 G1 GC；
+- Python 3.10 或更高版本；
+- macOS 或带有 `ps` 命令的类 Unix 系统。资源采样脚本目前依赖 `ps`。
 
-在终端执行：
+## 快速演示
+
+在仓库根目录执行：
 
 ```bash
-cd /Users/wlffffff/code/rust/rust_exp/rust-kv
-cargo build --release --bin kv-memory-server --bin kv-bench
+./rust_exp/demo.sh
 ```
 
-## 二、运行 Rust 实验
-
-终端 1：
+默认执行 1 轮、预热 3 秒、测量 10 秒。可以通过环境变量调整：
 
 ```bash
-./target/release/kv-memory-server --addr 127.0.0.1:7878
+ROUNDS=2 WARMUP_SECONDS=5 DURATION_SECONDS=15 RATE=60000 ./rust_exp/demo.sh
 ```
 
-终端 2：
+演示结果写入 `rust_exp/results/demo-<时间戳>/`，该目录已被 Git 忽略。
+
+## 正式实验
+
+### 1. 构建 Rust 服务端和统一压测客户端
 
 ```bash
-./target/release/kv-bench \
-  --addr 127.0.0.1:7878 \
-  --label rust \
+cargo build --release \
+  --manifest-path rust_exp/rust-kv/Cargo.toml \
+  --bin kv-memory-server \
+  --bin kv-bench
+```
+
+### 2. 编译 Java 17 服务端
+
+使用 Maven：
+
+```bash
+mvn -q -f rust_exp/java-kv/pom.xml compile
+```
+
+没有 Maven 时也可以直接使用 `javac`：
+
+```bash
+mkdir -p rust_exp/java-kv/target/classes
+javac --release 17 \
+  -d rust_exp/java-kv/target/classes \
+  rust_exp/java-kv/src/main/java/experiment/JavaKvServer.java
+```
+
+### 3. 交替运行五轮实验
+
+```bash
+python3 rust_exp/run_formal_experiment.py \
+  --rounds 5 \
+  --warmup 10 \
+  --duration 30 \
+  --rate 60000 \
   --clients 32 \
   --keys 50000 \
-  --value-size 1024 \
-  --warmup-seconds 30 \
-  --duration-seconds 60 \
-  --output ../results/rust.csv
+  --value-size 1024
 ```
 
-## 三、通过 IntelliJ IDEA 运行 Java
+脚本交替运行 Rust 与 Java，Java 固定使用 256 MiB 堆和 G1 GC，并以 250 ms 间隔
+采集两端服务进程的 CPU 与 RSS。结果默认写入
+`rust_exp/results/formal-<时间戳>/`。
 
-1. 在 IntelliJ IDEA 中打开 `java-kv` 文件夹或其中的 `pom.xml`。
-2. 等待 IDE 识别 Maven 项目和 JDK。
-3. 选择共享运行配置 `Java KV Server (G1 256MiB)`。
-4. 点击运行按钮。
-
-该配置固定使用：
-
-```text
--Xms256m
--Xmx256m
--XX:+UseG1GC
-```
-
-GC 日志保存到 `results/java-gc.log`。本机当前安装的是 OpenJDK 26，但项目源码
-按 Java 17 语法编译，便于在其他机器复现。
-
-Java 服务启动后，在终端执行同一个压测程序：
+### 4. 汇总并生成图表
 
 ```bash
-cd /Users/wlffffff/code/rust/rust_exp/rust-kv
-./target/release/kv-bench \
-  --addr 127.0.0.1:7879 \
-  --label java-g1 \
-  --clients 32 \
-  --keys 50000 \
-  --value-size 1024 \
-  --warmup-seconds 30 \
-  --duration-seconds 60 \
-  --output ../results/java-g1.csv
+python3 rust_exp/generate_dashboard.py rust_exp/results/formal-<时间戳>
 ```
 
-## 四、公平性要求
+输出包括：
 
-- Rust 和 Java 必须使用完全相同的压测参数。
-- 一次只运行一个服务器，避免互相争抢 CPU 和内存。
-- 正式实验前关闭其他高负载程序。
-- 每种实现至少运行 5 次，交替运行顺序。
-- 每轮 Java 实验后保存并重命名 `java-gc.log`，避免下一轮覆盖。
-- 不要开启原项目的逐条实时日志，也不要加入 WAL；这些 IO 会掩盖 GC 影响。
+- `formal-summary.md`：五轮总体结果中位数；
+- `overall-results.csv`：每轮总体指标；
+- `dashboard-data.json`：四宫格图使用的逐秒中位数；
+- `performance-dashboard.svg`：CPU、平均延迟、P95 和最大延迟四宫格；
+- 每轮 Rust/Java 压测 CSV、资源采样、服务日志和 Java GC 日志。
 
-当前最小版本采用闭环负载：每个客户端收到响应后才发送下一条请求。它适合先完成
-课程对照，但存在“协调遗漏”限制；后续若需要发表级数据，再升级为固定速率负载。
+## 已归档结果
 
-## 五、结果说明
+仓库保留了一组五轮正式实验：
 
-CSV 每秒记录一次吞吐量、P50、P95、P99、P99.9 和最大延迟，并包含总体结果。
-重点比较：
+- [实验摘要](results/formal-20260903-123413/formal-summary.md)
+- [总体指标](results/formal-20260903-123413/overall-results.csv)
+- [性能四宫图](results/formal-20260903-123413/performance-dashboard.svg)
 
-1. Java GC 日志中的暂停时刻是否与 Java P99/P99.9 尖峰重合。
-2. Rust 与 Java 的总体吞吐量。
-3. 两者 P99、P99.9 和最大延迟的稳定性。
+保留原始 CSV、元数据、资源采样和每轮日志，便于复核汇总结论。日志内的绝对输出
+路径只是实验发生时的历史记录，不影响在其他目录复现。
 
-实验只能支持“Rust 没有 GC 引起的集中停顿，尾延迟更可预测”这一结论，不能仅凭
-一次测试宣称 Rust 在所有场景下都比 Java 快。
+## 结论边界
 
-## 六、自动生成摘要和图表
-
-完成一轮 Rust 与 Java 正式实验后执行：
-
-```bash
-cd /Users/wlffffff/code/rust/rust_exp
-python3 analyze_results.py \
-  --rust results/rust.csv \
-  --java results/java-g1.csv \
-  --gc-log results/java-gc.log \
-  --output-dir results/comparison
-```
-
-将生成：
-
-```text
-results/comparison/comparison-summary.md
-results/comparison/latency-timeline.svg
-```
-
-图中实线表示 P99.9，虚线表示最大延迟，红色竖线表示 Java GC 暂停。
+当前实验只支持以下有限判断：在 32 客户端、50000 个键、1 KiB value、256 MiB
+Java 堆和持续覆盖写入的配置下，Rust 没有 GC 引起的集中式暂停，P99、P99.9 和
+最大延迟比 Java G1 更稳定。逐秒数据与 GC 暂停只能说明时间相关性，不能把每个
+延迟峰值都直接归因于 GC，也不能据此宣称 Rust 在所有负载下都更快。
